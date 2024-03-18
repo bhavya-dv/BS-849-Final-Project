@@ -1,0 +1,24 @@
+---
+title: 'Final Project: BS 849'
+author: "Bhavya Deepti Vadavalli"
+date: "2024-03-15"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction and Setup
+
+```{r intro}
+#Loading packages and data 
+library("curl") #to pull data set
+library("rjags")
+library("coda")
+library("formatR")
+library("dplyr")
+
+tics.data.2021 <- read.csv("tics.data.2021.csv")
+```
+
