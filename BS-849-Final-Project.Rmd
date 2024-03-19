@@ -1,6 +1,6 @@
 ---
 title: 'Final Project: BS 849'
-author: "Bhavya Deepti Vadavalli"
+author: "Irene Park, Megan Finke, Bhavya Vadavalli, Annie Goodridge"
 date: "2024-03-15"
 output: word_document
 ---
@@ -20,5 +20,41 @@ library("formatR")
 library("dplyr")
 
 tics.data.2021 <- read.csv("tics.data.2021.csv")
+```
+
+Before we began our analysis, we cleaned and manipulated the data set so that it was usable for the JAGS code. We recoded Yes/No dichotomous variables such that "Yes" was 1, and "No" was 0. For MC.Asprin, we removed NA values. For other variables with NA values, we chose to handle them through imputation at later stages rather than directly removing NA values. 
+
+```{r data-ready}
+# Select baseline observations and variables of interest
+baseline_data <- tics.data.2021 %>%
+  filter(!is.na(TICS01)) %>%
+  select(ID, ptype, Age.at.Enrollment, Age01, BMI, SH.Ever.Smoked., MC.Aspirin, MC.Stroke, MC.Diabetes.Mellitus, MC.HTN, MC.Coronary.Artery.Disease, MC.Cancer, MC.Heart.Attack, Years.of.Education, TICS01)
+
+# Recode "yes" and "no" variables to 1 and 0, handling missing values
+baseline_data <- baseline_data %>%
+  mutate(SH.Ever.Smoked. = if_else(SH.Ever.Smoked. == "Yes", 1, if_else(SH.Ever.Smoked. == "No", 0, NA_integer_)),
+         MC.Aspirin = if_else(MC.Aspirin == "Yes", 1, if_else(MC.Aspirin == "No", 0, NA_integer_)),
+         MC.Stroke = if_else(MC.Stroke == "Yes", 1, if_else(MC.Stroke == "No", 0, NA_integer_)),
+         MC.Diabetes.Mellitus = if_else(MC.Diabetes.Mellitus == "Yes", 1, if_else(MC.Diabetes.Mellitus == "No", 0, NA_integer_)),
+         MC.HTN = if_else(MC.HTN == "Yes", 1, if_else(MC.HTN == "No", 0, NA_integer_)),
+         MC.Coronary.Artery.Disease = if_else(MC.Coronary.Artery.Disease == "Yes", 1, if_else(MC.Coronary.Artery.Disease == "No", 0, NA_integer_)),
+         MC.Cancer = if_else(MC.Cancer == "Yes", 1, if_else(MC.Cancer == "No", 0, NA_integer_)),
+         MC.Heart.Attack = if_else(MC.Heart.Attack == "Yes", 1, if_else(MC.Heart.Attack == "No", 0, NA_integer_)))
+
+# Remove observations where MC.Aspirin is NA
+baseline_data<- baseline_data[!is.na(baseline_data$MC.Aspirin), ]
+
+head(baseline_data)
+
+# Using summary() function
+summary(baseline_data)
+
+# Using colSums() and is.na()
+missing_values <- colSums(is.na(baseline_data))
+missing_values
+
+# Assuming 'data_longitudinal' is your longitudinal dataset
+
+warnings()
 ```
 
