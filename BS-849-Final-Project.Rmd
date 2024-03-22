@@ -332,7 +332,7 @@ num_unique_families <- length(unique(tics_long$fam.num))
 print(num_unique_families)
 
 ```
-We build a heirarchical model where the mean output is a linear regression of ptype, adjusted for all the confounder variables. Here, this is an extra alpha-variable for each family cluster, which was modelled using a normal prior. We found that there were 232 family clusters. 
+We build a hierarchical model where the mean output is a linear regression of ptype, adjusted for all the confounder variables. Here, this is an extra alpha-variable for each family cluster, which was modelled using a normal prior. We found that there were 232 family clusters. 
 
 ```{r q3}
 # Define the hierarchical model
@@ -403,4 +403,56 @@ samples_hierarchical <- coda.samples(model_hierarchical, variable.names = c("bet
 # Summarize posterior distributions
 print(summary(samples_hierarchical))
 ```
-The output shows 
+The output shows a statistically significant negative effect between rate of TICS and age of enrollment, and bmi. Smoking had a small statistically significant positive effect on the outcome. The other variables were found to be insignificant. The interaction term between time and p-type was also found to have a small significant positive effect on the outcome.
+
+```{r q3_convergence}
+gelman.diag(samples_hierarchical) # beta_age, and beta_interaction do not reach convergence
+gelman.plot(samples_hierarchical) 
+
+samples_hierarchical <- coda.samples(model_hierarchical, variable.names = c("beta0", "beta_age", "beta_interaction", "beta_offspring", "beta_bmi", "beta_smoke", "beta_aspirin", "beta_stroke", "beta_diabetes", "beta_htn", "beta_cad"), n.iter = 10000, thin = 8)
+
+gelman.diag(samples_hierarchical) # beta_age, and beta_interaction do not reach convergence
+gelman.plot(samples_hierarchical)
+
+print(summary(samples_hierarchical))
+```
+We ran a Gelman-Rubin Convergence Analysis. Initially, we found that beta_age and beta_interaction did not reach convergence. All variables reached convergence by adding a thinning interval of 8. This did not affect any overall conclusions. 
+
+## Missingness and the effect on results: 
+
+To understand how missingness impacted our results, we tabulated the missing values and Calculated the proportion of missing values between the control group and the offspring of centennials 
+
+```{r missingness1}
+
+summary(tics.data.2021)
+
+# Using colSums() and is.na()
+missing_values <- colSums(is.na(tics.data.2021))
+missing_values
+
+
+# Create a contingency table of ptype and missingness
+contingency_table <- table(tics.data.2021$ptype, is.na(tics.data.2021$TICS01))
+
+# Display the contingency table
+print(contingency_table)
+
+# Calculate proportions of missingness within each level of ptype
+prop_missing <- tapply(is.na(tics.data.2021$TICS01), tics.data.2021$ptype, mean)
+print(prop_missing)
+
+prop_missing <- tapply(is.na(tics.data.2021$TICS02), tics.data.2021$ptype, mean)
+print(prop_missing)
+
+prop_missing <- tapply(is.na(tics.data.2021$TICS03), tics.data.2021$ptype, mean)
+print(prop_missing)
+
+prop_missing <- tapply(is.na(tics.data.2021$TICS04), tics.data.2021$ptype, mean)
+print(prop_missing)
+
+prop_missing <- tapply(is.na(tics.data.2021$TICS05), tics.data.2021$ptype, mean)
+print(prop_missing)
+
+```
+Missing values for the Age and TICS variables increase with time (from Age01 to Age05, and from TICS01 to TICS05). This can be associated with increasing deaths as time goes by. Additionally, the control group has more missing values than the the offspring of centennials. While there is no direct evidence, this could be due to higher number of deaths in the control population. We did not find missing values to affect our overall results. 
+
