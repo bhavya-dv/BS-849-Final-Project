@@ -2,7 +2,7 @@
 title: 'Final Project: BS 849'
 author: "Irene Park, Megan Finke, Bhavya Vadavalli, Annie Goodridge"
 date: "2024-03-15"
-output: word_document
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -10,6 +10,9 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ## Introduction and Setup
+```{r}
+
+```
 
 ```{r intro}
 #Loading packages and data 
@@ -18,6 +21,7 @@ library("rjags")
 library("coda")
 library("formatR")
 library("dplyr")
+library("tidyr")
 
 tics.data.2021 <- read.csv("tics.data.2021.csv")
 ```
@@ -58,3 +62,345 @@ missing_values
 warnings()
 ```
 
+## Finding Confounding Variables: 
+
+In order to find confounding variables for the final model, we first ran a set of linear regression models to check which variables significantly affected the ptype variable (where 0 = Controls, 2 = Centenarian Offspring). Here, we modeled the outcome variable Y[i] as a normal distribution if the variable was continuous, and Y[i] as Binomial for dichotomous variables. The code specifications and priors are given below:  
+
+```{r confounders-cont}
+
+set.seed(111) #all results based on this 
+
+#### Continuous ####
+model_continuous <- "
+model{
+# Priors
+  for (i in 1:2) {
+    mu[i] ~ dnorm(0, 0.001)
+    sigma[i] ~ dunif(0, 100)
+  }
+  
+  # Likelihood
+  for (i in 1:N) {
+    Y[i] ~ dnorm(mu[ptype[i] + 1], 1/sqrt(sigma[ptype[i] + 1]))
+  }
+  
+  # Parameters of interest
+  diff_mean <- mu[2] - mu[1]
+  diff_std <- sqrt(sigma[1]^2 + sigma[2]^2)
+}"
+
+# Prepare data for JAGS
+jags_data <- list(N = nrow(baseline_data),
+                  ptype = baseline_data$ptype,
+                  Y = NULL)  # We'll update Y for each variable in the loop
+
+# Create an empty list to store samples
+samples_list <- list()
+
+# Loop through each variable
+for (variable in c("Age.at.Enrollment", "BMI", "Years.of.Education", "TICS01")) {
+  # Update data for each variable
+  jags_data$Y <- baseline_data[[variable]]
+  jags_data$ptype <- baseline_data$ptype
+  
+  # Compile the model
+  model <- jags.model(textConnection(model_continuous), data = jags_data, n.adapt=15000)
+  
+  # Run the model
+  update(model, 10000)
+  samples <- coda.samples(model, variable.names = c("mu", "sigma", "diff_mean", "diff_std"), n.iter = 10000)
+  
+  # Store samples
+  samples_list[[variable]] <- samples
+  
+  # Summarize posterior distributions
+  print(paste("Summary for", variable))
+  print(summary(samples))
+}
+
+# Plot posterior distributions if needed
+plot(samples)
+
+```
+
+Based on the summary results, we found that BMI and Age at enrollment both had 95% CI that excluded zero and therefore, were confounding variables. This was not the case for Years of Education and TICS01. 
+
+``` {r dichotomous}
+set.seed(111)
+#### Dichotomous ####
+model_odds <- "model{
+  ### data model
+  for(i in 1:N){
+  Y[i] ~ dbin(p[i], 1)
+  logit(p[i]) <- beta_0+beta_1*ptype[i]
+  
+  }
+  
+    OR <-exp(beta_1)
+    pos.prob <- step(OR - 2)
+    ### prior
+    beta_0 ~ dnorm(0,0.0001)
+    beta_1 ~ dnorm(0,0.0001)
+}"
+
+# Prepare data for JAGS
+jags_data <- list(N = nrow(baseline_data),
+                  ptype = baseline_data$ptype,
+                  Y = NULL)  # We'll update Y for each variable in the loop
+
+# Create an empty list to store samples
+samples_odds <- list()
+
+# Loop through each variable
+for (variable in c("SH.Ever.Smoked.", "MC.Aspirin", "MC.Stroke", "MC.Diabetes.Mellitus", "MC.HTN", "MC.Coronary.Artery.Disease", "MC.Cancer", "MC.Heart.Attack")) {
+  # Update data for each variable
+  jags_data$Y <- baseline_data[[variable]]
+  jags_data$ptype <- baseline_data$ptype
+  
+  # Compile the model
+  model.odds <- jags.model(textConnection(model_odds), data = jags_data, n.adapt=1500)
+  
+  # Run the model
+  update(model.odds, n.iter = 10000)
+  samples <- coda.samples(model.odds, variable.names = c('OR','beta_0','beta_1', 'pos.prob'), n.iter = 10000)
+  
+  # Store samples
+  samples_odds[[variable]] <- samples
+  
+  # Summarize posterior distributions
+  print(paste("Summary for", variable))
+  print(summary(samples))
+}
+
+```
+Based on the summary results, the OR, beta0, and beta1 values for SH.Ever.Smoked, MC.Asprin, MC.Stroke, MC.Diabetes.Melitus, MC.HTN, MC.Coronary.Artery.Disease all had 95% confidence intervals that exclude 0, and therefore, can be considered confounding variables. 
+
+## Comparing TICS Scores at Baseline 
+
+This part involves modeling the outcome variable while adjusting for all confounding variables (i.e. BMI, Age at Enrollment, SH.Ever.Smoked, MC.Asprin, MC.Diabetes.Melitus, MC.Stroke, MC.HTN, MC.Coronary.Artery Disease). We modeled the outcone variable as a normal distribution with mean mu [i] and a standard deviation tau. mu[i] is modeled as a regression adjusted for each confounding variable. The priors for the confounders are al normally distributed with mean 0 and precision 0.001. 
+
+```{r q2}
+
+model_linear <- "
+model {
+for (i in 1:N) {
+    Y[i] ~ dnorm(mu[i], tau)
+    mu[i] <- beta0 + beta_offspring * ptype[i] + beta_age * Age01[i] + beta_bmi * BMI[i] + beta_smoke * SH.Ever.Smoked[i] + beta_aspirin * MC.Aspirin[i] + beta_stroke * MC.Stroke[i] + beta_diabetes * MC.Diabetes.Mellitus[i] + beta_htn * MC.HTN[i] + beta_cad * MC.Coronary.Artery.Disease[i]  # Include other confounders here
+}
+  
+  # Priors
+  beta0 ~ dnorm(0, 0.001)
+  beta_offspring ~ dnorm(0, 0.001)
+  beta_age ~ dnorm(0, 0.001)
+  beta_bmi ~ dnorm(0, 0.001)
+  beta_smoke ~ dnorm(0, 0.001)
+  beta_aspirin ~ dnorm(0, 0.001)
+  beta_stroke ~ dnorm(0, 0.001)
+  beta_diabetes ~ dnorm(0, 0.001)
+  beta_htn ~ dnorm(0, 0.001)
+  beta_cad ~ dnorm(0, 0.001)
+  tau ~ dgamma (1,1)
+  
+}"
+
+
+# Calculate the mean BMI
+mean_bmi <- mean(baseline_data$BMI, na.rm = TRUE)
+
+# Replace missing BMI values with the mean
+baseline_data$BMI[is.na(baseline_data$BMI)] <- mean_bmi
+
+# Prepare data for JAGS
+jags_data_linear <- list(
+  N = nrow(baseline_data),
+  BMI = baseline_data$BMI,
+  MC.Aspirin = baseline_data$MC.Aspirin,
+  ptype = baseline_data$ptype,
+  Age01 = baseline_data$Age01,
+  SH.Ever.Smoked = baseline_data$SH.Ever.Smoked.,
+  MC.Stroke = baseline_data$MC.Stroke,
+  MC.Diabetes.Mellitus = baseline_data$MC.Diabetes.Mellitus,
+  MC.HTN = baseline_data$MC.HTN,
+  MC.Coronary.Artery.Disease = baseline_data$MC.Coronary.Artery.Disease,
+  Y = baseline_data$TICS01
+)
+
+
+# Compile the model
+model <- jags.model(textConnection(model_linear), data = jags_data_linear, n.chains = 3)
+
+# Run the model
+update(model, 10000)
+
+samples_linear <- coda.samples(model, variable.names = c("beta0", "beta_age", "beta_offspring", "beta_bmi","beta_smoke","beta_aspirin","beta_stroke", "beta_diabetes", "beta_htn", "beta_cad", "sigma"), n.iter = 10000)
+
+# Summarize posterior distributions
+print(summary(samples_linear))
+
+geweke.diag(samples_linear, frac1 = 0.1, frac2 = 0.5)
+geweke.plot(samples_linear, frac1 = 0.1, frac2 = 0.5)
+
+gelman.diag(samples_linear)
+gelman.plot(samples_linear, ylim = c(1, 4))
+
+```
+## Rate of Change of TICS: 
+
+The aim of this section is to to investigate whether there are differences in the rate of change of TICS
+between offspring of centenarians and individuals without parental longevity (ptype). We used the longitudinal data set for this, which was first cleaned to remove NA values and recode dichotomous variables. For missing values Age variables, we imputed using the mean values. 
+
+```{r q3_imputation}
+# Clean the longitudinal data
+tics_clean <- tics.data.2021 %>%
+  filter(!is.na(TICS01) & !is.na(TICS02) & !is.na(TICS03) & !is.na(TICS04) & !is.na(TICS05)) %>%
+  select(ID, fam.num, ptype, Age.at.Enrollment, Age01, Age02, Age03, Age04, Age05, BMI, SH.Ever.Smoked., 
+         MC.Aspirin, MC.Stroke, MC.Diabetes.Mellitus, MC.HTN, MC.Coronary.Artery.Disease, 
+         MC.Cancer, MC.Heart.Attack, Years.of.Education, TICS01, TICS02, TICS03, TICS04, TICS05)
+
+# Recode "yes" and "no" variables to 1 and 0, handling missing values
+tics_clean <- tics_clean %>%
+  mutate(SH.Ever.Smoked. = if_else(SH.Ever.Smoked. == "Yes", 1, if_else(SH.Ever.Smoked. == "No", 0, NA_integer_)),
+         MC.Aspirin = if_else(MC.Aspirin == "Yes", 1, if_else(MC.Aspirin == "No", 0, NA_integer_)),
+         MC.Stroke = if_else(MC.Stroke == "Yes", 1, if_else(MC.Stroke == "No", 0, NA_integer_)),
+         MC.Diabetes.Mellitus = if_else(MC.Diabetes.Mellitus == "Yes", 1, if_else(MC.Diabetes.Mellitus == "No", 0, NA_integer_)),
+         MC.HTN = if_else(MC.HTN == "Yes", 1, if_else(MC.HTN == "No", 0, NA_integer_)),
+         MC.Coronary.Artery.Disease = if_else(MC.Coronary.Artery.Disease == "Yes", 1, if_else(MC.Coronary.Artery.Disease == "No", 0, NA_integer_)),
+         MC.Cancer = if_else(MC.Cancer == "Yes", 1, if_else(MC.Cancer == "No", 0, NA_integer_)),
+         MC.Heart.Attack = if_else(MC.Heart.Attack == "Yes", 1, if_else(MC.Heart.Attack == "No", 0, NA_integer_)))
+
+# Remove observations where MC.Aspirin is NA
+tics_clean <- tics_clean[!is.na(baseline_data$MC.Aspirin), ]
+
+head(tics_clean)
+
+# Impute missing values for Age01 to Age05 with mean age value at each visit
+tics_clean[is.na(tics_clean$Age01), "Age01"] <- mean(tics_clean$Age01, na.rm = TRUE)
+tics_clean[is.na(tics_clean$Age02), "Age02"] <- mean(tics_clean$Age02, na.rm = TRUE)
+tics_clean[is.na(tics_clean$Age03), "Age03"] <- mean(tics_clean$Age03, na.rm = TRUE)
+tics_clean[is.na(tics_clean$Age04), "Age04"] <- mean(tics_clean$Age04, na.rm = TRUE)
+tics_clean[is.na(tics_clean$Age05), "Age05"] <- mean(tics_clean$Age05, na.rm = TRUE)
+
+# Define the clustering variable
+fam.num <- tics_clean$fam.num
+
+# Initialize a vector to store the family index
+tics_clean$fam <- NA
+
+# Assign family index based on fam.num
+tics_clean$fam[1] <- 1
+for (i in 2:nrow(tics_clean)) {
+  if (!is.na(tics_clean$fam.num[i]) && !is.na(tics_clean$fam.num[i - 1])) {
+    if (tics_clean$fam.num[i] == tics_clean$fam.num[i - 1]) {
+      tics_clean$fam[i] <- tics_clean$fam[i - 1]
+    } else {
+      tics_clean$fam[i] <- tics_clean$fam[i - 1] + 1
+    }
+  } else {
+    tics_clean$fam[i] <- NA
+  }
+}
+
+
+# Transform the data from wide to long format
+tics_long <- tics_clean %>%
+  pivot_longer(cols = starts_with("Age0"), names_to = "Time_Age", values_to = "Age") %>%
+  pivot_longer(cols = starts_with("TICS"), names_to = "Time_TICS", values_to = "TICS") %>%
+  group_by(ID, Time_Age, Time_TICS) %>%
+  slice(1)
+
+tics_long <- tics_long %>%
+  mutate(Age_Last_Two = substr(Time_Age, nchar(Time_Age) - 1, nchar(Time_Age)),
+         TICS_Last_Two = substr(Time_TICS, nchar(Time_TICS) - 1, nchar(Time_TICS))) %>%
+  filter(Age_Last_Two == TICS_Last_Two) %>%
+  select(-Age_Last_Two, -TICS_Last_Two)
+
+
+tics_long <- tics_long %>%
+  mutate(Time = as.numeric(substr(Time_Age, nchar(Time_Age), nchar(Time_Age))))
+
+# View the modified data
+print(tics_long)
+
+# View the transformed data
+head(tics_long)
+
+tics_long <- tics_long[!is.na(tics_long$fam.num), ]
+fam <- unique(tics_long$fam.num[!is.na(tics_long$fam.num)])
+
+# Count the number of unique family IDs
+num_unique_families <- length(unique(tics_long$fam.num))
+print(num_unique_families)
+
+```
+We build a heirarchical model where the mean output is a linear regression of ptype, adjusted for all the confounder variables. Here, this is an extra alpha-variable for each family cluster, which was modelled using a normal prior. We found that there were 232 family clusters. 
+
+```{r q3}
+# Define the hierarchical model
+model_hierarchical <- "
+model {
+  # Likelihood
+  for (i in 1:N) {
+    mu[i] <- beta0 + beta_offspring * ptype[i] + beta_age * Age[i] + beta_interaction * Time[i] * ptype[i] + beta_bmi * BMI[i] + beta_smoke * SH.Ever.Smoked[i] + beta_aspirin * MC.Aspirin[i] + beta_stroke * MC.Stroke[i] + beta_diabetes * MC.Diabetes.Mellitus[i] + beta_htn * MC.HTN[i] + beta_cad * MC.Coronary.Artery.Disease[i] + alpha[fam[i]]
+    Y[i] ~ dnorm(mu[i], tau)
+  }
+
+  # Cluster-level effects
+  for (j in 1:J) {
+    alpha[j] ~ dnorm(beta0, tau)
+  }
+  
+  # Priors
+  beta0 ~ dnorm(0, 0.001)
+  beta_offspring ~ dnorm(0, 0.001)
+  beta_age ~ dnorm(0, 0.001)
+  beta_interaction ~ dnorm(0, 0.001)
+  beta_bmi ~ dnorm(0, 0.001)
+  beta_smoke ~ dnorm(0, 0.001)
+  beta_aspirin ~ dnorm(0, 0.001)
+  beta_stroke ~ dnorm(0, 0.001)
+  beta_diabetes ~ dnorm(0, 0.001)
+  beta_htn ~ dnorm(0, 0.001)
+  beta_cad ~ dnorm(0, 0.001)
+  tau ~ dgamma(1, 1)
+}
+"
+
+# Calculate the mean BMI
+mean_bmi <- mean(tics_clean$BMI, na.rm = TRUE)
+
+# Replace missing BMI values with the mean
+tics_long$BMI[is.na(tics_long$BMI)] <- mean_bmi
+
+# Calculate the number of unique families
+num_unique_families <- length(unique(tics_long$fam))
+
+# Prepare data for JAGS
+jags_data_hierarchical <- list(
+  N = nrow(tics_long),
+  BMI = tics_long$BMI,
+  MC.Aspirin = tics_long$MC.Aspirin,
+  ptype = tics_long$ptype,
+  Age = tics_long$Age,
+  Time = tics_long$Time,
+  SH.Ever.Smoked = tics_long$SH.Ever.Smoked.,
+  MC.Stroke = tics_long$MC.Stroke,
+  MC.Diabetes.Mellitus = tics_long$MC.Diabetes.Mellitus,
+  MC.HTN = tics_long$MC.HTN,
+  MC.Coronary.Artery.Disease = tics_long$MC.Coronary.Artery.Disease,
+  fam = tics_long$fam,
+  J = num_unique_families,
+  Y = tics_long$TICS
+)
+
+
+# Compile the model
+model_hierarchical <- jags.model(textConnection(model_hierarchical), data = jags_data_hierarchical, n.adapt = 1500, n.chains = 3)
+
+# Run the model
+update(model_hierarchical, 10000)
+samples_hierarchical <- coda.samples(model_hierarchical, variable.names = c("beta0", "beta_age", "beta_interaction", "beta_offspring", "beta_bmi", "beta_smoke", "beta_aspirin", "beta_stroke", "beta_diabetes", "beta_htn", "beta_cad"), n.iter = 10000)
+
+# Summarize posterior distributions
+print(summary(samples_hierarchical))
+```
+The output shows 
