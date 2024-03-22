@@ -454,5 +454,7 @@ prop_missing <- tapply(is.na(tics.data.2021$TICS05), tics.data.2021$ptype, mean)
 print(prop_missing)
 
 ```
-Missing values for the Age and TICS variables increase with time (from Age01 to Age05, and from TICS01 to TICS05). This can be associated with increasing deaths as time goes by. Additionally, the control group has more missing values than the the offspring of centennials. While there is no direct evidence, this could be due to higher number of deaths in the control population. We did not find missing values to affect our overall results. 
+Missing values for the Age and TICS variables increase with time (from Age01 to Age05, and from TICS01 to TICS05). This can be associated with increasing deaths as time goes by. Additionally, the control group has more missing values than the the offspring of centennials. While there is no direct evidence, this could be due to higher number of deaths in the control population. 
+
+It is unclear whether the missing values changed our results. This is a possible drawback of longitudinal data. However, We did perform mean imputation in our analysis to account for the missing values. 
 
