@@ -9,10 +9,7 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Introduction and Setup
-```{r}
-
-```
+## Setup
 
 ```{r intro}
 #Loading packages and data 
@@ -180,7 +177,7 @@ Based on the summary results, the OR, beta0, and beta1 values for SH.Ever.Smoked
 This part involves modeling the outcome variable while adjusting for all confounding variables (i.e. BMI, Age at Enrollment, SH.Ever.Smoked, MC.Asprin, MC.Diabetes.Melitus, MC.Stroke, MC.HTN, MC.Coronary.Artery Disease). We modeled the outcone variable as a normal distribution with mean mu [i] and a standard deviation tau. mu[i] is modeled as a regression adjusted for each confounding variable. The priors for the confounders are al normally distributed with mean 0 and precision 0.001. 
 
 ```{r q2}
-
+set.seed(111)
 model_linear <- "
 model {
 for (i in 1:N) {
@@ -335,6 +332,7 @@ print(num_unique_families)
 We build a hierarchical model where the mean output is a linear regression of ptype, adjusted for all the confounder variables. Here, this is an extra alpha-variable for each family cluster, which was modelled using a normal prior. We found that there were 232 family clusters. 
 
 ```{r q3}
+set.seed(111)
 # Define the hierarchical model
 model_hierarchical <- "
 model {
@@ -456,5 +454,84 @@ print(prop_missing)
 ```
 Missing values for the Age and TICS variables increase with time (from Age01 to Age05, and from TICS01 to TICS05). This can be associated with increasing deaths as time goes by. Additionally, the control group has more missing values than the the offspring of centennials. While there is no direct evidence, this could be due to higher number of deaths in the control population. 
 
-It is unclear whether the missing values changed our results. This is a possible drawback of longitudinal data. However, We did perform mean imputation in our analysis to account for the missing values. 
+It is unclear whether the missing values changed our results. This is a possible drawback of longitudinal data. However, We did perform mean imputation for age and BMI in our analysis to account for the missing values. 
+
+## Checking for family-group level interactions 
+
+In order to check if groups had significantly different values for rate of TICS, we included an additional interaction term between family groups and time. However, the results show that there was only a small, but significant affect of the family groups on the rate of TICS (beta_interaction2). 
+
+```{r q4}
+set.seed (111)
+# Define the hierarchical model
+model_hierarchical <- "
+model {
+  # Likelihood
+  for (i in 1:N) {
+    mu[i] <- beta0 + beta_offspring * ptype[i] + beta_age * Age[i] + 
+    beta_interaction * Time[i] * ptype[i] + beta_interaction2 * Time[i] * fam[i] + beta_bmi * BMI[i] + beta_smoke * SH.Ever.Smoked[i] + 
+    beta_aspirin * MC.Aspirin[i] + beta_stroke * MC.Stroke[i] + beta_diabetes * MC.Diabetes.Mellitus[i] + 
+    beta_htn * MC.HTN[i] + beta_cad * MC.Coronary.Artery.Disease[i] + alpha[fam[i]]
+    Y[i] ~ dnorm(mu[i], tau)
+  }
+
+  # Cluster-level effects
+  for (j in 1:J) {
+    alpha[j] ~ dnorm(beta0, tau)
+  }
+  
+  # Priors
+  beta0 ~ dnorm(0, 0.001)
+  beta_offspring ~ dnorm(0, 0.001)
+  beta_age ~ dnorm(0, 0.001)
+  beta_interaction ~ dnorm(0, 0.001)
+  beta_interaction2 ~ dnorm (0, 0.001)
+  beta_bmi ~ dnorm(0, 0.001)
+  beta_smoke ~ dnorm(0, 0.001)
+  beta_aspirin ~ dnorm(0, 0.001)
+  beta_stroke ~ dnorm(0, 0.001)
+  beta_diabetes ~ dnorm(0, 0.001)
+  beta_htn ~ dnorm(0, 0.001)
+  beta_cad ~ dnorm(0, 0.001)
+  tau ~ dgamma(1, 1)
+}
+"
+
+# Calculate the mean BMI
+mean_bmi <- mean(tics_clean$BMI, na.rm = TRUE)
+
+# Replace missing BMI values with the mean
+tics_long$BMI[is.na(tics_long$BMI)] <- mean_bmi
+
+# Calculate the number of unique families
+num_unique_families <- length(unique(tics_long$fam))
+
+# Prepare data for JAGS
+jags_data_hierarchical <- list(
+  N = nrow(tics_long),
+  BMI = tics_long$BMI,
+  MC.Aspirin = tics_long$MC.Aspirin,
+  ptype = tics_long$ptype,
+  Age = tics_long$Age,
+  Time = tics_long$Time,
+  SH.Ever.Smoked = tics_long$SH.Ever.Smoked.,
+  MC.Stroke = tics_long$MC.Stroke,
+  MC.Diabetes.Mellitus = tics_long$MC.Diabetes.Mellitus,
+  MC.HTN = tics_long$MC.HTN,
+  MC.Coronary.Artery.Disease = tics_long$MC.Coronary.Artery.Disease,
+  fam = tics_long$fam,
+  J = num_unique_families,
+  Y = tics_long$TICS
+)
+
+
+# Compile the model
+model_hierarchical <- jags.model(textConnection(model_hierarchical), data = jags_data_hierarchical, n.adapt = 1500, n.chains = 3)
+
+# Run the model
+update(model_hierarchical, 10000)
+samples_hierarchical <- coda.samples(model_hierarchical, variable.names = c("beta0", "beta_age", "beta_interaction", "beta_interaction2", "beta_offspring", "beta_bmi", "beta_smoke", "beta_aspirin", "beta_stroke", "beta_diabetes", "beta_htn", "beta_cad"), n.iter = 5000, thin=8)
+
+# Summarize posterior distributions
+print(summary(samples_hierarchical))
+```
 
