@@ -413,6 +413,9 @@ gelman.diag(samples_hierarchical) # beta_age, and beta_interaction do not reach 
 gelman.plot(samples_hierarchical)
 
 print(summary(samples_hierarchical))
+
+geweke.diag(samples_hierarchical, frac1 = 0.1, frac2 = 0.5)
+geweke.plot(samples_hierarchical, frac1 = 0.1, frac2 = 0.5)
 ```
 We ran a Gelman-Rubin Convergence Analysis. Initially, we found that beta_age and beta_interaction did not reach convergence. All variables reached convergence by adding a thinning interval of 8. This did not affect any overall conclusions. 
 
